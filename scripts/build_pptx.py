@@ -69,21 +69,57 @@ def clone_slide(prs, src):
     return new
 
 
-def _style(run, size, bold, color, ea):
-    """size/bold/color/ea 传 None = 不覆盖（保留模版继承）—— spec Gate 要求。"""
+def _style(run, size, bold, color, ea, latin=None):
+    """None=不覆盖(继承模版)。ea=中文字体, latin=西文字体(缺省同ea)。"""
     if size is not None:
         run.font.size = Pt(size)
     if bold is not None:
         run.font.bold = bold
     if color is not None:
         run.font.color.rgb = RGBColor.from_string(color)
-    if ea is not None:
+    pairs = (("ea", ea), ("latin", latin if latin is not None else ea))
+    if any(v for _, v in pairs):
         rpr = run._r.get_or_add_rPr()
-        for tag in ("ea", "latin"):
+        for tag, v in pairs:
+            if v is None:
+                continue
             e = rpr.find(f"{{{A_NS}}}{tag}")
             if e is None:
                 e = etree.SubElement(rpr, f"{{{A_NS}}}{tag}")
-            e.set("typeface", ea)
+            e.set("typeface", v)
+
+
+STYLE, LEC = {}, "reading"   # style_form.json（全局样式表单）+ 当前讲次类型
+
+
+def FS(key):
+    return STYLE.get(key, {})
+
+
+def frun(p, text, key, **over):
+    st = {**FS(key), **over}
+    r = p.add_run(); r.text = text
+    _style(r, st.get("sz"), st.get("bold"), st.get("color"),
+           st.get("ea"), st.get("latin"))
+    return r
+
+
+def ftb(slide, geom, paras, align=None, anchor=None, ls=None):
+    """表单驱动文本框。paras=[[(样式key,文字),...] 每段]。"""
+    bx = slide.shapes.add_textbox(*[Inches(v) for v in geom])
+    tf = bx.text_frame; tf.word_wrap = True
+    if anchor is not None:
+        tf.vertical_anchor = anchor
+    first = True
+    for runs in paras:
+        p = tf.paragraphs[0] if first else tf.add_paragraph(); first = False
+        if align is not None:
+            p.alignment = align
+        if ls is not None:
+            p.line_spacing = ls
+        for key, txt in runs:
+            frun(p, txt, key)
+    return bx
 
 
 def tb(slide, text, left, top, w, h, size=24, bold=False, color=INK, ea=EA_EN,
@@ -258,27 +294,35 @@ def r_divider(prs, part, no):
 
 def r_section(prs, title):
     s = _blank(prs)
-    tb(s, title, 1.0, 4.6, PAGE_W - 2, 1.8, size=72, bold=True, color=PURPLE,
-       ea=EA_CN, align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+    ftb(s, (0.4, 3.4, PAGE_W - 0.8, 5.2), [[(f"section_big_{LEC}", title)]],
+        align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
     return s
 
 
 def r_source(prs, src, level=""):
     s = _blank(prs)
-    tb(s, str(src).replace("【", "").replace("】", ""), 1.0, 5.0, PAGE_W - 2, 1.6,
-       size=72, bold=True, color=INK, ea=EA_CN, align=PP_ALIGN.CENTER,
-       anchor=MSO_ANCHOR.MIDDLE)
+    ftb(s, (1.0, 4.6, PAGE_W - 2, 2.4),
+        [[(f"source_big_{LEC}", str(src).replace("【", "").replace("】", ""))]],
+        align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
     if level:
         tb(s, level, 1.0, 6.8, PAGE_W - 2, 0.8, size=28, color=GOLD, ea=EA_EN,
            align=PP_ALIGN.CENTER)
     return s
 
 
-def r_passage(prs, paras, tail="", size=18, bold=False):
+def r_passage(prs, paras, tail=""):
     s = _blank(prs)
-    body = "\n".join(paras) + (("\n\n" + tail) if tail else "")
-    tb(s, body, 0.9, 0.9, PAGE_W - 1.8, PAGE_H - 1.7, size=size, bold=bold,
-       color=INK, ea=EA_EN, ls=1.15)
+    P = []
+    for t in paras:
+        if t and t[0] in CIRC:        # 段号①加粗（标杆）
+            P.append([("passage_mark", t[0]), ("passage", t[1:])])
+        else:
+            P.append([("passage", t)])
+    if tail:
+        P.append([("passage", "")])
+        for ln in tail.split("\n"):
+            P.append([("passage_mark", ln)])     # 续写提示行加粗（标杆Para标签粗）
+    ftb(s, (0.9, 0.9, PAGE_W - 1.8, PAGE_H - 1.7), P, ls=1.15)
     return s
 
 
@@ -296,20 +340,27 @@ def r_table_page(prs, title, rows, col_w, head=True, bsz=16):
     return s
 
 
-def r_question(prs, tag, stem, options, practice=False):
+def r_question(prs, tag, stem, options, practice=False, zh=None):
+    """题页（表单混排）：题干粗 / 选项不粗 / 选项中文=微软雅黑粗（仿标杆双语行内）。"""
     s = _titled(prs, tag)
-    body = stem + "\n" + "\n".join(options)
+    zh = zh or []
+    P = [[("q_stem", stem)]]
+    for i, o in enumerate(options):
+        runs = [("q_opt", o)]
+        if i < len(zh) and zh[i]:
+            runs.append(("q_opt_zh", "  " + zh[i]))
+        P.append(runs)
     if practice:   # 讲义的方法练习留白（R1）
-        body += "\n\n【小题答案】__________\n【主旨辅助】______________________________"
-    tb(s, body, 1.0, 2.2, PAGE_W - 2, PAGE_H - 3.0,
-       size=24, bold=True, color=INK, ea=EA_EN, ls=1.25)   # 标杆: sz24 bold Arial
+        P.append([("q_practice", "")])
+        P.append([("q_practice", "【小题答案】__________")])
+        P.append([("q_practice", "【主旨辅助】______________________________")])
+    ftb(s, (1.0, 2.2, PAGE_W - 2, PAGE_H - 3.0), P, ls=1.25)
     return s
 
 
 def r_answer(prs, tag, answer, analysis, apply_txt=""):
     s = _titled(prs, tag)
-    tb(s, f"【答案】{answer}", 1.0, 2.1, PAGE_W - 2, 0.8, size=28, bold=True,
-       color=RED, ea="Arial")
+    ftb(s, (1.0, 2.1, PAGE_W - 2, 0.8), [[("ans_head", f"【答案】{answer}")]])
     y = 3.0
     if apply_txt:   # C·AI：主旨辅助在本题的应用（仿标杆“主旨相关/常规解题验证”）
         box(s, "【主旨辅助】" + apply_txt, 1.0, y, PAGE_W - 2, 1.9,
@@ -317,8 +368,8 @@ def r_answer(prs, tag, answer, analysis, apply_txt=""):
             anchor=MSO_ANCHOR.MIDDLE, ea=EA_CN, bold=False)
         y += 2.1
         ai_note(s)
-    tb(s, "【解析】" + analysis, 1.0, y, PAGE_W - 2, PAGE_H - y - 0.9, size=20,
-       color=RED, ea="Arial", ls=1.22)   # 标杆: 解析整块红 Arial
+    ftb(s, (1.0, y, PAGE_W - 2, PAGE_H - y - 0.9),
+        [[("ans_body", "【解析】" + analysis)]], ls=1.22)
     return s
 
 
@@ -326,23 +377,26 @@ def r_test(prs, kind, q, reveal):
     """课前测/课后测（C·AI 模仿标杆生成，标注待师审）：克隆模版固定页，保留"课前测/课后测"标题。"""
     s = clone_slide(prs, prs.slides[(T["pre"] if kind == "pre" else T["post"]) - 1])
     if not reveal:
-        body = q["stem"] + "\n\n" + "      ".join(q["options"])
-        tb(s, body, 1.53, 4.7, 13.6, 3.2, size=24, color=INK, ea=EA_EN, ls=1.3)
-    else:
-        tb(s, f"【答案】{q['answer']}\n【解析】{q['analysis']}", 1.53, 3.9, 13.6, 5.5,
-           size=24, color=RED, ea="Arial", ls=1.25)
+        ftb(s, (1.53, 4.7, 13.6, 3.2),
+            [[("test_stem", q["stem"])], [("test_opt", "")],
+             [("test_opt", "      ".join(q["options"]))]], ls=1.3)
+    else:   # 标杆：【答案】sz68大字红 + 解析sz24红
+        ftb(s, (1.53, 3.5, 13.6, 6.8),
+            [[("test_ans_head", f"【答案】{q['answer']}")],
+             [("test_ans_body", "【解析】" + q["analysis"])]], ls=1.2)
     ai_note(s)
     return s
 
 
-def r_method(prs, title, lines):
-    """C·AI 方法讲解页（模仿标杆结构，待师审）。"""
+def r_method(prs, title, lines, line_key="method_line"):
+    """C·AI 方法讲解页（行样式查表单：method_line / warn_line）。"""
     s = _titled(prs, title)
-    y = 2.4
+    st = FS(line_key); y = 2.4
     for ln in lines:
-        box(s, ln, 1.2, y, PAGE_W - 2.4, 1.45, fill=CARD_BG, line=CARD_LN,
-            size=20, color=INK, anchor=MSO_ANCHOR.MIDDLE, ea=EA_CN, bold=False)
-        y += 1.65
+        box(s, ln, 1.2, y, PAGE_W - 2.4, 1.5, fill=CARD_BG, line=CARD_LN,
+            size=st.get("sz", 24), color=INK, anchor=MSO_ANCHOR.MIDDLE,
+            ea=st.get("ea", "微软雅黑"), bold=st.get("bold", False))
+        y += 1.7
     ai_note(s)
     return s
 
@@ -366,22 +420,26 @@ def r_flow(prs, title, steps):
 
 def r_guide(prs, name, prompt="你会怎么表达?"):
     s = _blank(prs)
-    box(s, name, 6.6, 3.2, 3.4, 2.2, fill="F3E9F7", line=PURPLE2, size=44,
-        color=PURPLE, align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE, ea=EA_CN)
-    tb(s, prompt, 1.0, 7.4, PAGE_W - 2, 1.8, size=72, color=INK, ea=EA_CN,
-       align=PP_ALIGN.CENTER)
+    box(s, name, 6.6, 3.2, 3.4, 2.2, fill="F3E9F7", line=PURPLE2,
+        size=FS("plot_box").get("sz", 53), color=PURPLE,
+        align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE, ea=EA_CN)
+    ftb(s, (1.0, 7.2, PAGE_W - 2, 2.0), [[("guide_prompt", prompt)]],
+        align=PP_ALIGN.CENTER)
     return s
 
 
 def r_translation(prs, label, name, zh, en, note=""):
     """翻译页（基础版本/升级版本）：中文 + 英文（讲义直出）。"""
     s = _blank(prs)
-    box(s, label, 0.99, 0.98, 3.46, 1.2, fill="F3E9F7", line=PURPLE2, size=40,
-        color=PURPLE, align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
-    box(s, name, 13.0, 0.95, 2.6, 2.2, fill="FFFFFF", line=PURPLE2, size=40,
-        color=INK, align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE, ea=EA_CN)
-    tb(s, zh, 1.27, 5.0, 14.14, 1.6, size=34, color=INK, ea=EA_CN, ls=1.2)
-    tb(s, en, 1.27, 6.9, 14.14, 1.6, size=27, color=INK, ea=EA_EN, ls=1.15)
+    k = "basic" if "基础" in label else "upgrade"
+    box(s, label, 0.99, 0.98, 3.46, 1.2, fill="F3E9F7", line=PURPLE2,
+        size=FS("label_badge").get("sz", 46), color=PURPLE,
+        align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+    box(s, name, 13.0, 0.95, 2.6, 2.2, fill="FFFFFF", line=PURPLE2,
+        size=FS("plot_name_box").get("sz", 60), color=INK,
+        align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE, ea=EA_CN)
+    ftb(s, (1.27, 4.8, 14.14, 2.2), [[(f"trans_{k}_zh", zh)]], ls=1.15)
+    ftb(s, (1.27, 7.3, 14.14, 1.8), [[(f"trans_{k}_en", en)]], ls=1.1)
     if note:
         tb(s, note, 1.0, PAGE_H - 1.0, PAGE_W - 2, 0.5, size=13, color=PURPLE2,
            ea="微软雅黑")
@@ -453,11 +511,11 @@ def r_segment(prs, details, filled, hint1="", hint2=""):
                  (f"【{d['label']}】{d['zh']}" if filled else "")] for d in ds]
     shou = [d for d in details if d["group"] == "首段"]
     ci = [d for d in details if d["group"] == "次段"]
-    tb(s, "首段" + (f"提示句：{hint1}" if hint1 else ""), 1.2, 2.1, 14.2, 0.5,
-       size=22, bold=True, color="7D292D", ea=EA_TITLE)
+    ftb(s, (1.2, 2.1, 14.2, 0.5),
+        [[("seg_header", "首段" + (f"提示句：{hint1}" if hint1 else ""))]])
     add_table(s, rows(shou), 1.2, 2.65, 14.2, 3.4, [0.9, 13.3], head=False, bsz=15)
-    tb(s, "次段" + (f"提示句：{hint2}" if hint2 else ""), 1.2, 6.45, 14.2, 0.5,
-       size=22, bold=True, color="7D292D", ea=EA_TITLE)
+    ftb(s, (1.2, 6.45, 14.2, 0.5),
+        [[("seg_header", "次段" + (f"提示句：{hint2}" if hint2 else ""))]])
     add_table(s, rows(ci), 1.2, 7.0, 14.2, 3.4, [0.9, 13.3], head=False, bsz=15)
     return s
 
@@ -465,30 +523,39 @@ def r_segment(prs, details, filled, hint1="", hint2=""):
 def r_detail(prs, d, desc, reveal):
     """情节描写：中文 →(揭示) 英文，左上 序号+情节名+首/次段+描写类型(C·AI)。"""
     s = _blank(prs)
-    box(s, d["group"], 0.94, 1.07, 1.4, 1.65, fill="F3E9F7", line=PURPLE2, size=34,
-        color=PURPLE, align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE, ea=EA_CN)
-    box(s, f"{CIRC[d['index']-1]} {d['label']}", 2.45, 1.07, 3.11, 0.79,
-        fill="FFFFFF", line=PURPLE2, size=30, color=INK,
+    box(s, d["group"], 0.94, 1.07, 1.4, 1.65, fill="F3E9F7", line=PURPLE2,
+        size=FS("detail_group").get("sz", 38), color=PURPLE,
         align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE, ea=EA_CN)
-    box(s, desc, 2.45, 1.93, 3.11, 0.79, fill="FFFFFF", line=PURPLE2, size=30,
+    box(s, f"{CIRC[d['index']-1]} {d['label']}", 2.45, 1.07, 3.11, 0.79,
+        fill="FFFFFF", line=PURPLE2, size=FS("detail_label").get("sz", 36),
         color=INK, align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE, ea=EA_CN)
-    tb(s, d["zh"], 1.29, 5.1, 14.09, 1.6, size=30, color=INK, ea=EA_CN, ls=1.2)
+    box(s, desc, 2.45, 1.93, 3.11, 0.79, fill="FFFFFF", line=PURPLE2,
+        size=FS("detail_label").get("sz", 36), color=INK,
+        align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE, ea=EA_CN)
+    ftb(s, (1.29, 5.0, 14.09, 1.7), [[("detail_zh", d["zh"])]], ls=1.2)
     if reveal:
-        tb(s, d["en"], 1.29, 6.9, 14.09, 1.6, size=26, color=INK, ea=EA_EN, ls=1.15)
+        ftb(s, (1.29, 6.9, 14.09, 1.7), [[("detail_en", d["en"])]], ls=1.15)
     return s
 
 
 def r_essay(prs, part):
     s = _blank(prs)
-    box(s, "参考范文", 0.9, 1.07, 2.47, 0.79, fill="F3E9F7", line=PURPLE2, size=30,
-        color=PURPLE, align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+    box(s, "参考范文", 0.9, 1.07, 2.47, 0.79, fill="F3E9F7", line=PURPLE2,
+        size=FS("essay_badge").get("sz", 33), color=PURPLE,
+        align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
     d = part["details"]
     p1 = part["prompts"]["para1"].replace("Para 1: ", "段落一：") + " " + \
         " ".join(x["en"] for x in d if x["group"] == "首段")
     p2 = part["prompts"]["para2"].replace("Para 2: ", "段落二：") + " " + \
         " ".join(x["en"] for x in d if x["group"] == "次段")
-    tb(s, p1 + "\n\n" + p2, 1.29, 2.3, 14.09, 9.3, size=24, bold=True, color=INK,
-       ea=EA_EN, ls=1.2)
+    P = []
+    for blk in (p1, "", p2):
+        if blk and blk.startswith("段落"):
+            head, _, rest = blk.partition("：")
+            P.append([("seg_header", head + "："), ("essay_body", rest)])
+        else:
+            P.append([("essay_body", blk)])
+    ftb(s, (1.29, 2.3, 14.09, 9.3), P, ls=1.2)
     return s
 
 
@@ -502,14 +569,15 @@ def specs_reading(C):
     add("cover", "封面"); add("toc", "目录"); add("km", "Knowledge Map")
     add("preview", "Preview"); add("leadin", "Leading-in")
     if SC.get("intro"):                          # C·AI 导入场景（仿标杆"似曾相似"）
-        add("method", SC["intro"]["title"], lines=SC["intro"]["lines"])
+        add("method", SC["intro"]["title"], lines=SC["intro"]["lines"],
+            line_key="warn_line")
     add("divider", "PART1", part=C["parts"][0], no=1)
     zz = C["part1_zhuzhi"]
     add("section", zz.get("title", "主旨辅助"))
     for m in SC.get("methods", {}).get("主旨辅助", []):          # C·AI 方法讲解
         add("method", m["title"], lines=m["lines"])
     add("source", f"例篇 {zz['source']}", src=zz["source"])
-    add("passage", "例篇语篇", paras=zz["passage"], size=20, bold=True)
+    add("passage", "例篇语篇", paras=zz["passage"])
     if zz.get("method_table"):
         add("table", "主旨辅助 练习表", rows=zz["method_table"], col_w=[5.0, 9.67], head=False)
     applies = SC.get("zhuzhi_apply", [])
@@ -534,16 +602,13 @@ def specs_reading(C):
     for psg in C["part2"]:
         add("source", f"{psg['name']} {psg['source']}", src=psg["source"],
             level=psg.get("level", ""))
-        add("passage", f"{psg['name']} 语篇", paras=psg["passage"], size=20, bold=True)
+        add("passage", f"{psg['name']} 语篇", paras=psg["passage"])
         zh_all = SC.get("options_zh", {}).get(psg["name"], [])
         for i, q in enumerate(psg["questions"], 1):
             tag = f"{psg['name']} · 第{i}题"
-            opts = q["options"]
             zh = zh_all[i - 1] if i - 1 < len(zh_all) else []
-            if zh and len(zh) == len(opts):    # C·AI 选项中文（仿标杆双语）
-                opts = [f"{o}（{z}）" for o, z in zip(opts, zh)]
-            add("question", tag, tag=tag, stem=q["stem"], options=opts,
-                practice=q.get("practice", False))
+            add("question", tag, tag=tag, stem=q["stem"], options=q["options"],
+                zh=zh, practice=q.get("practice", False))
             add("answer", tag + " 答", tag=tag, answer=q.get("answer", ""),
                 analysis=q.get("analysis", ""))
     if SC.get("posttest"):                      # C·AI 课后测（结束页前）
@@ -691,6 +756,15 @@ def render(content_path, template_path, out_path, lec_type=None, km_image=None):
     SC = json.loads(scp.read_text(encoding="utf-8")) if scp.exists() else {}
     lec_type = lec_type or C.get("lecture_type") or \
         ("continuation" if "part1_plots" in C else "reading")
+    global STYLE, LEC
+    LEC = lec_type
+    sf = next((p for p in [Path(content_path).parent / "style_form.json",
+                           Path(__file__).resolve().parent.parent / "references" / "style_form.json"]
+               if p.exists()), None)
+    if sf is None:
+        raise SystemExit("❌ Gate未过：缺 style_form.json（全局文字样式表单），先用 extract_styles.py 拆解参考PPT制表")
+    STYLE = json.loads(sf.read_text(encoding="utf-8"))
+    print(f"✅ 样式表单已加载：{sf.name}（{len(STYLE)-1} 项，文字样式全部查表）")
     specs = specs_continuation(C) if lec_type == "continuation" else specs_reading(C)
 
     Path(out_path).with_name("slide_structure.json").write_text(
@@ -713,15 +787,15 @@ def render(content_path, template_path, out_path, lec_type=None, km_image=None):
         elif r == "divider": r_divider(prs, s["part"], s["no"])
         elif r == "section": r_section(prs, s["summary"])
         elif r == "source": r_source(prs, s["src"], s.get("level", ""))
-        elif r == "passage": r_passage(prs, s["paras"], s.get("tail", ""),
-                                       s.get("size", 18), s.get("bold", False))
+        elif r == "passage": r_passage(prs, s["paras"], s.get("tail", ""))
         elif r == "table": r_table_page(prs, s["summary"], s["rows"], s["col_w"],
                                         s.get("head", True), s.get("bsz", 16))
         elif r == "question": r_question(prs, s["tag"], s["stem"], s["options"],
-                                          s.get("practice", False))
+                                          s.get("practice", False), s.get("zh"))
         elif r == "answer": r_answer(prs, s["tag"], s["answer"], s["analysis"],
                                      s.get("apply_txt", ""))
-        elif r == "method": r_method(prs, s["summary"], s["lines"])
+        elif r == "method": r_method(prs, s["summary"], s["lines"],
+                                     s.get("line_key", "method_line"))
         elif r in ("test_q", "test_a"): r_test(prs, s["kind"], s["q"], s["reveal"])
         elif r == "flow": r_flow(prs, s["title"], s["steps"])
         elif r == "guide": r_guide(prs, s["name"])

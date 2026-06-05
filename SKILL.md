@@ -53,7 +53,10 @@ PART2 篇章训练: 分隔 → 每篇[题源+难度★ → 语篇 → 每题(题
 ## 执行流程
 
 ```bash
-# 0.【Gate·必做】拆解模版 → template_spec（字体/字号/颜色/坐标/版式全清单）
+# 0.【Gate·必做】双拆解 → 双表单（build 前自动核对，缺一中止）
+#  ① 模版拆解 → template_spec.json（fixture页/版式/标题槽）
+#  ② 参考PPT逐run样式拆解(extract_styles.py) → 人工curate成 style_form.json（全局文字字体/字号/颜色表单）
+#     文字样式一律查表单渲染，禁止代码里写死；混排（题干粗/选项不粗/选项中文/答案大字）也按表单
 #    新模版必跑；build_pptx.py 生成前会自动核对 spec，不一致即中止
 python3 {SKILL_DIR}/scripts/dissect_template.py "<原始课件模板.pptx>" -o {SKILL_DIR}/references/
 #    人工读一遍 references/template_spec.md，确认：标题槽样式(默认sz40/#BA7AC2/普惠体B@y0.98)、
