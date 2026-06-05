@@ -30,7 +30,7 @@ REF_ATTRS = [qn('r:embed'), qn('r:link'), qn('r:id'), qn('r:pict')]
 # ════════ 设计 token（以 references/template_spec.md 为准，生成前必核对）════════
 TITLE_COL = "BA7AC2"                     # 模版页标题色(spec: 课前/课后测 Text5)
 PURPLE, PURPLE2 = "BA7AC2", "A076CE"     # 标题紫 / 次级紫(页码标pill)
-INK, RED, GOLD = "1A1A1A", "FF5050", "F2A900"
+INK, RED, GOLD = "1A1A1A", "FF0000", "F2A900"   # RED=标杆答案红FF0000
 CARD_BG, CARD_LN = "FFF7EC", "E6C9A8"    # 暖卡片
 HL_BG, HL_LN = "E8F5E9", "46A35E"        # 正确高亮
 EA_TITLE, EA_CN, EA_EN = "阿里巴巴普惠体 B", "可口可乐在乎体 楷体", "Arial"
@@ -40,7 +40,7 @@ AI_NOTE = "（AI 生成 · 待老师审核修改）"
 CIRC = "①②③④⑤⑥⑦⑧⑨⑩"
 
 # 模版 fixture 页（原始课件模板.pptx，1-based；spec 固定页）
-T = dict(cover=2, titled=1, blank=4, div=[5, 7, 9], end=12)
+T = dict(cover=2, titled=1, blank=4, div=[5, 7, 9], end=12, pre=1, post=11)
 
 SC = {}   # ai_scaffold（C类内容），render() 载入
 
@@ -266,7 +266,7 @@ def r_section(prs, title):
 def r_source(prs, src, level=""):
     s = _blank(prs)
     tb(s, str(src).replace("【", "").replace("】", ""), 1.0, 5.0, PAGE_W - 2, 1.6,
-       size=60, bold=True, color=INK, ea=EA_CN, align=PP_ALIGN.CENTER,
+       size=72, bold=True, color=INK, ea=EA_CN, align=PP_ALIGN.CENTER,
        anchor=MSO_ANCHOR.MIDDLE)
     if level:
         tb(s, level, 1.0, 6.8, PAGE_W - 2, 0.8, size=28, color=GOLD, ea=EA_EN,
@@ -274,10 +274,11 @@ def r_source(prs, src, level=""):
     return s
 
 
-def r_passage(prs, paras, tail=""):
+def r_passage(prs, paras, tail="", size=18, bold=False):
     s = _blank(prs)
     body = "\n".join(paras) + (("\n\n" + tail) if tail else "")
-    tb(s, body, 0.9, 0.9, PAGE_W - 1.8, PAGE_H - 1.7, size=18, color=INK, ea=EA_EN, ls=1.15)
+    tb(s, body, 0.9, 0.9, PAGE_W - 1.8, PAGE_H - 1.7, size=size, bold=bold,
+       color=INK, ea=EA_EN, ls=1.15)
     return s
 
 
@@ -301,14 +302,14 @@ def r_question(prs, tag, stem, options, practice=False):
     if practice:   # 讲义的方法练习留白（R1）
         body += "\n\n【小题答案】__________\n【主旨辅助】______________________________"
     tb(s, body, 1.0, 2.2, PAGE_W - 2, PAGE_H - 3.0,
-       size=24, color=INK, ea=EA_EN, ls=1.25)
+       size=24, bold=True, color=INK, ea=EA_EN, ls=1.25)   # 标杆: sz24 bold Arial
     return s
 
 
 def r_answer(prs, tag, answer, analysis, apply_txt=""):
     s = _titled(prs, tag)
-    tb(s, f"【答案】{answer}", 1.0, 2.1, PAGE_W - 2, 0.8, size=30, bold=True,
-       color=RED, ea=EA_CN)
+    tb(s, f"【答案】{answer}", 1.0, 2.1, PAGE_W - 2, 0.8, size=28, bold=True,
+       color=RED, ea="Arial")
     y = 3.0
     if apply_txt:   # C·AI：主旨辅助在本题的应用（仿标杆“主旨相关/常规解题验证”）
         box(s, "【主旨辅助】" + apply_txt, 1.0, y, PAGE_W - 2, 1.9,
@@ -316,8 +317,21 @@ def r_answer(prs, tag, answer, analysis, apply_txt=""):
             anchor=MSO_ANCHOR.MIDDLE, ea=EA_CN, bold=False)
         y += 2.1
         ai_note(s)
-    tb(s, "【解析】" + analysis, 1.0, y, PAGE_W - 2, PAGE_H - y - 0.9, size=19,
-       color=INK, ea=EA_CN, ls=1.22)
+    tb(s, "【解析】" + analysis, 1.0, y, PAGE_W - 2, PAGE_H - y - 0.9, size=20,
+       color=RED, ea="Arial", ls=1.22)   # 标杆: 解析整块红 Arial
+    return s
+
+
+def r_test(prs, kind, q, reveal):
+    """课前测/课后测（C·AI 模仿标杆生成，标注待师审）：克隆模版固定页，保留"课前测/课后测"标题。"""
+    s = clone_slide(prs, prs.slides[(T["pre"] if kind == "pre" else T["post"]) - 1])
+    if not reveal:
+        body = q["stem"] + "\n\n" + "      ".join(q["options"])
+        tb(s, body, 1.53, 4.7, 13.6, 3.2, size=24, color=INK, ea=EA_EN, ls=1.3)
+    else:
+        tb(s, f"【答案】{q['answer']}\n【解析】{q['analysis']}", 1.53, 3.9, 13.6, 5.5,
+           size=24, color=RED, ea="Arial", ls=1.25)
+    ai_note(s)
     return s
 
 
@@ -482,15 +496,20 @@ def r_essay(prs, part):
 def specs_reading(C):
     sp = []
     add = lambda role, summary, **kw: sp.append({"role": role, "summary": summary, **kw})
+    if SC.get("pretest"):                       # C·AI 课前测（标杆置于封面前）
+        add("test_q", "课前测·题(AI)", kind="pre", q=SC["pretest"], reveal=False)
+        add("test_a", "课前测·答(AI)", kind="pre", q=SC["pretest"], reveal=True)
     add("cover", "封面"); add("toc", "目录"); add("km", "Knowledge Map")
     add("preview", "Preview"); add("leadin", "Leading-in")
+    if SC.get("intro"):                          # C·AI 导入场景（仿标杆"似曾相似"）
+        add("method", SC["intro"]["title"], lines=SC["intro"]["lines"])
     add("divider", "PART1", part=C["parts"][0], no=1)
     zz = C["part1_zhuzhi"]
     add("section", zz.get("title", "主旨辅助"))
     for m in SC.get("methods", {}).get("主旨辅助", []):          # C·AI 方法讲解
         add("method", m["title"], lines=m["lines"])
     add("source", f"例篇 {zz['source']}", src=zz["source"])
-    add("passage", "例篇语篇", paras=zz["passage"])
+    add("passage", "例篇语篇", paras=zz["passage"], size=20, bold=True)
     if zz.get("method_table"):
         add("table", "主旨辅助 练习表", rows=zz["method_table"], col_w=[5.0, 9.67], head=False)
     applies = SC.get("zhuzhi_apply", [])
@@ -515,7 +534,7 @@ def specs_reading(C):
     for psg in C["part2"]:
         add("source", f"{psg['name']} {psg['source']}", src=psg["source"],
             level=psg.get("level", ""))
-        add("passage", f"{psg['name']} 语篇", paras=psg["passage"])
+        add("passage", f"{psg['name']} 语篇", paras=psg["passage"], size=20, bold=True)
         zh_all = SC.get("options_zh", {}).get(psg["name"], [])
         for i, q in enumerate(psg["questions"], 1):
             tag = f"{psg['name']} · 第{i}题"
@@ -527,6 +546,9 @@ def specs_reading(C):
                 practice=q.get("practice", False))
             add("answer", tag + " 答", tag=tag, answer=q.get("answer", ""),
                 analysis=q.get("analysis", ""))
+    if SC.get("posttest"):                      # C·AI 课后测（结束页前）
+        add("test_q", "课后测·题(AI)", kind="post", q=SC["posttest"], reveal=False)
+        add("test_a", "课后测·答(AI)", kind="post", q=SC["posttest"], reveal=True)
     add("end", "结束")
     return sp
 
@@ -534,6 +556,9 @@ def specs_reading(C):
 def specs_continuation(C):
     sp = []
     add = lambda role, summary, **kw: sp.append({"role": role, "summary": summary, **kw})
+    if SC.get("pretest"):                       # C·AI 课前测（标杆置于封面前）
+        add("test_q", "课前测·题(AI)", kind="pre", q=SC["pretest"], reveal=False)
+        add("test_a", "课前测·答(AI)", kind="pre", q=SC["pretest"], reveal=True)
     add("cover", "封面"); add("toc", "目录"); add("km", "Knowledge Map")
     add("preview", "Preview")
     add("divider", "PART1", part=C["parts"][0], no=1)
@@ -580,6 +605,9 @@ def specs_continuation(C):
             add("detail", f"情节描写 {tagn} 题", d=d, desc=desc, reveal=False)
             add("detail", f"情节描写 {tagn} 答", d=d, desc=desc, reveal=True)
         add("essay", "参考范文", part=part)
+    if SC.get("posttest"):                      # C·AI 课后测（结束页前）
+        add("test_q", "课后测·题(AI)", kind="post", q=SC["posttest"], reveal=False)
+        add("test_a", "课后测·答(AI)", kind="post", q=SC["posttest"], reveal=True)
     add("end", "结束")
     return sp
 
@@ -624,10 +652,15 @@ def add_sections(prs, specs):
     P14 = "http://schemas.microsoft.com/office/powerpoint/2010/main"
     SEC = "{521415D9-36F7-43E2-AB2F-B90AF26B5E84}"
     GUIDS = [f"{{B1A9C8E0-000{i}-4A1A-9C01-00000000000{i}}}" for i in range(1, 9)]
-    bounds = [("封面 · 目录", 1)]
+    cover_pos = next((i + 1 for i, s in enumerate(specs) if s["role"] == "cover"), 1)
+    bounds = ([("课前测", 1)] if cover_pos > 1 else []) + [("封面 · 目录", cover_pos)]
     for i, s in enumerate(specs):
         if s["role"] == "divider":
             bounds.append((s["summary"], i + 1))
+    post_pos = next((i + 1 for i, s in enumerate(specs)
+                     if s["role"] == "test_q" and s.get("kind") == "post"), None)
+    if post_pos:
+        bounds.append(("课后测", post_pos))
     end_pos = next((i + 1 for i, s in enumerate(specs) if s["role"] == "end"), None)
     if end_pos:
         bounds.append(("结束", end_pos))
@@ -680,7 +713,8 @@ def render(content_path, template_path, out_path, lec_type=None, km_image=None):
         elif r == "divider": r_divider(prs, s["part"], s["no"])
         elif r == "section": r_section(prs, s["summary"])
         elif r == "source": r_source(prs, s["src"], s.get("level", ""))
-        elif r == "passage": r_passage(prs, s["paras"], s.get("tail", ""))
+        elif r == "passage": r_passage(prs, s["paras"], s.get("tail", ""),
+                                       s.get("size", 18), s.get("bold", False))
         elif r == "table": r_table_page(prs, s["summary"], s["rows"], s["col_w"],
                                         s.get("head", True), s.get("bsz", 16))
         elif r == "question": r_question(prs, s["tag"], s["stem"], s["options"],
@@ -688,6 +722,7 @@ def render(content_path, template_path, out_path, lec_type=None, km_image=None):
         elif r == "answer": r_answer(prs, s["tag"], s["answer"], s["analysis"],
                                      s.get("apply_txt", ""))
         elif r == "method": r_method(prs, s["summary"], s["lines"])
+        elif r in ("test_q", "test_a"): r_test(prs, s["kind"], s["q"], s["reveal"])
         elif r == "flow": r_flow(prs, s["title"], s["steps"])
         elif r == "guide": r_guide(prs, s["name"])
         elif r == "trans": r_translation(prs, s["label"], s["name"], s["zh"], s["en"])
