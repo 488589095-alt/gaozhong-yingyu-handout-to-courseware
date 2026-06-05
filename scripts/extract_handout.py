@@ -135,7 +135,12 @@ def collect_reading(paras):
             aans = t[4:].strip()
         elif t.startswith("【解析】"):
             aana = t[4:].strip()
-        elif t.startswith(("【小题答案】", "【主旨辅助】", "_")):
+        elif t.startswith("【主旨辅助】"):
+            # 讲义的方法练习留白（R1内容，不可丢）：标记到最近一题
+            if questions:
+                questions[-1]["practice"] = True
+            continue
+        elif t.startswith(("【小题答案】", "_")):
             continue
         elif mode == "a" and aana is not None:
             aana += t
@@ -166,6 +171,8 @@ def parse_reading(items, C):
         sec = section("主旨辅助")
         src, lv, psg, qs = collect_reading(paras_of(sec))
         tbls = tables_of(sec)
+        for q in qs:
+            q.setdefault("practice", True)   # 主旨辅助节：每题带【小题答案】/【主旨辅助】留白
         C["part1_zhuzhi"] = {"title": "主旨辅助", "source": src, "passage": psg,
                              "method_table": tbls[-1] if tbls else [], "questions": qs}
     if "选项辅助" in names:

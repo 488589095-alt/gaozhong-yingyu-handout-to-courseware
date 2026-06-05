@@ -295,19 +295,41 @@ def r_table_page(prs, title, rows, col_w, head=True, bsz=16):
     return s
 
 
-def r_question(prs, tag, stem, options):
+def r_question(prs, tag, stem, options, practice=False):
     s = _titled(prs, tag)
-    tb(s, stem + "\n" + "\n".join(options), 1.0, 2.2, PAGE_W - 2, PAGE_H - 3.0,
-       size=26, color=INK, ea=EA_EN, ls=1.3)
+    body = stem + "\n" + "\n".join(options)
+    if practice:   # 讲义的方法练习留白（R1）
+        body += "\n\n【小题答案】__________\n【主旨辅助】______________________________"
+    tb(s, body, 1.0, 2.2, PAGE_W - 2, PAGE_H - 3.0,
+       size=24, color=INK, ea=EA_EN, ls=1.25)
     return s
 
 
-def r_answer(prs, tag, answer, analysis):
+def r_answer(prs, tag, answer, analysis, apply_txt=""):
     s = _titled(prs, tag)
-    tb(s, f"【答案】{answer}", 1.0, 2.2, PAGE_W - 2, 0.9, size=30, bold=True,
+    tb(s, f"【答案】{answer}", 1.0, 2.1, PAGE_W - 2, 0.8, size=30, bold=True,
        color=RED, ea=EA_CN)
-    tb(s, "【解析】" + analysis, 1.0, 3.2, PAGE_W - 2, PAGE_H - 4.0, size=20,
-       color=INK, ea=EA_CN, ls=1.25)
+    y = 3.0
+    if apply_txt:   # C·AI：主旨辅助在本题的应用（仿标杆“主旨相关/常规解题验证”）
+        box(s, "【主旨辅助】" + apply_txt, 1.0, y, PAGE_W - 2, 1.9,
+            fill="F3E9F7", line=PURPLE2, size=18, color=INK,
+            anchor=MSO_ANCHOR.MIDDLE, ea=EA_CN, bold=False)
+        y += 2.1
+        ai_note(s)
+    tb(s, "【解析】" + analysis, 1.0, y, PAGE_W - 2, PAGE_H - y - 0.9, size=19,
+       color=INK, ea=EA_CN, ls=1.22)
+    return s
+
+
+def r_method(prs, title, lines):
+    """C·AI 方法讲解页（模仿标杆结构，待师审）。"""
+    s = _titled(prs, title)
+    y = 2.4
+    for ln in lines:
+        box(s, ln, 1.2, y, PAGE_W - 2.4, 1.45, fill=CARD_BG, line=CARD_LN,
+            size=20, color=INK, anchor=MSO_ANCHOR.MIDDLE, ea=EA_CN, bold=False)
+        y += 1.65
+    ai_note(s)
     return s
 
 
@@ -465,17 +487,27 @@ def specs_reading(C):
     add("divider", "PART1", part=C["parts"][0], no=1)
     zz = C["part1_zhuzhi"]
     add("section", zz.get("title", "主旨辅助"))
+    for m in SC.get("methods", {}).get("主旨辅助", []):          # C·AI 方法讲解
+        add("method", m["title"], lines=m["lines"])
     add("source", f"例篇 {zz['source']}", src=zz["source"])
     add("passage", "例篇语篇", paras=zz["passage"])
     if zz.get("method_table"):
         add("table", "主旨辅助 练习表", rows=zz["method_table"], col_w=[5.0, 9.67], head=False)
+    applies = SC.get("zhuzhi_apply", [])
     for i, q in enumerate(zz["questions"], 1):
         tag = f"主旨辅助 · 第{i}题"
-        add("question", tag, tag=tag, stem=q["stem"], options=q["options"])
+        add("question", tag, tag=tag, stem=q["stem"], options=q["options"],
+            practice=q.get("practice", False))
         add("answer", tag + " 答", tag=tag, answer=q.get("answer", ""),
-            analysis=q.get("analysis", ""))
+            analysis=q.get("analysis", ""),
+            apply_txt=applies[i - 1] if i - 1 < len(applies) else "")
+    ms = SC.get("method_summary")
+    if ms:
+        add("method", ms["title"], lines=ms["lines"])             # 方法总结(C·AI)
     xx = C["part1_xuanxiang"]
     add("section", xx.get("title", "选项辅助"))
+    for m in SC.get("methods", {}).get("选项辅助", []):          # C·AI 方法讲解
+        add("method", m["title"], lines=m["lines"])
     if xx.get("table"):
         add("table", "选项辅助 特征表", rows=xx["table"], col_w=[2.6, 4.6, 2.6, 4.87],
             head=True, bsz=14)
@@ -484,9 +516,15 @@ def specs_reading(C):
         add("source", f"{psg['name']} {psg['source']}", src=psg["source"],
             level=psg.get("level", ""))
         add("passage", f"{psg['name']} 语篇", paras=psg["passage"])
+        zh_all = SC.get("options_zh", {}).get(psg["name"], [])
         for i, q in enumerate(psg["questions"], 1):
             tag = f"{psg['name']} · 第{i}题"
-            add("question", tag, tag=tag, stem=q["stem"], options=q["options"])
+            opts = q["options"]
+            zh = zh_all[i - 1] if i - 1 < len(zh_all) else []
+            if zh and len(zh) == len(opts):    # C·AI 选项中文（仿标杆双语）
+                opts = [f"{o}（{z}）" for o, z in zip(opts, zh)]
+            add("question", tag, tag=tag, stem=q["stem"], options=opts,
+                practice=q.get("practice", False))
             add("answer", tag + " 答", tag=tag, answer=q.get("answer", ""),
                 analysis=q.get("analysis", ""))
     add("end", "结束")
@@ -645,8 +683,11 @@ def render(content_path, template_path, out_path, lec_type=None, km_image=None):
         elif r == "passage": r_passage(prs, s["paras"], s.get("tail", ""))
         elif r == "table": r_table_page(prs, s["summary"], s["rows"], s["col_w"],
                                         s.get("head", True), s.get("bsz", 16))
-        elif r == "question": r_question(prs, s["tag"], s["stem"], s["options"])
-        elif r == "answer": r_answer(prs, s["tag"], s["answer"], s["analysis"])
+        elif r == "question": r_question(prs, s["tag"], s["stem"], s["options"],
+                                          s.get("practice", False))
+        elif r == "answer": r_answer(prs, s["tag"], s["answer"], s["analysis"],
+                                     s.get("apply_txt", ""))
+        elif r == "method": r_method(prs, s["summary"], s["lines"])
         elif r == "flow": r_flow(prs, s["title"], s["steps"])
         elif r == "guide": r_guide(prs, s["name"])
         elif r == "trans": r_translation(prs, s["label"], s["name"], s["zh"], s["en"])
