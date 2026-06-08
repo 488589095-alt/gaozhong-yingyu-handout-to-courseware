@@ -53,10 +53,14 @@ PART2 篇章训练: 分隔 → 每篇[题源+难度★ → 语篇 → 每题(题
 ## 执行流程
 
 ```bash
-# 0.【Gate·必做】双拆解 → 双表单（build 前自动核对，缺一中止）
-#  ① 模版拆解 → template_spec.json（fixture页/版式/标题槽）
-#  ② 参考PPT逐run样式拆解(extract_styles.py) → 人工curate成 style_form.json（全局文字字体/字号/颜色表单）
-#     文字样式一律查表单渲染，禁止代码里写死；混排（题干粗/选项不粗/选项中文/答案大字）也按表单
+# 0.【Gate·必做】三拆解（build 前完成，缺一中止）
+#  ① 模版拆解 → template_spec.json（fixture页/版式/标题槽）          dissect_template.py
+#  ② 参考PPT逐run样式拆解 → 人工curate成 style_form.json（全局字体/字号/颜色表单）  extract_styles.py
+#     文字样式一律查表单渲染，禁止代码里写死；混排（题干粗/选项中文/答案大字）也按表单
+#  ③ 参考PPT全页蓝图拆解 → 标杆蓝图_<type>.md（逐页 角色/版式/内容来源A·B·C）  blueprint_benchmark.py
+#     ★所有给到的标杆PPT都要拆解蓝图★；以蓝图为骨架，A填讲义/B克隆模版/C用AI生成并标"待师审"
+python3 {SKILL_DIR}/scripts/blueprint_benchmark.py "<标杆.pptx>" -o <case>/标杆蓝图_raw.txt
+#     已沉淀：references/标杆蓝图_reading.md（阅读）· 标杆蓝图_continuation.md（读后续写）
 #    新模版必跑；build_pptx.py 生成前会自动核对 spec，不一致即中止
 python3 {SKILL_DIR}/scripts/dissect_template.py "<原始课件模板.pptx>" -o {SKILL_DIR}/references/
 #    人工读一遍 references/template_spec.md，确认：标题槽样式(默认sz40/#BA7AC2/普惠体B@y0.98)、
