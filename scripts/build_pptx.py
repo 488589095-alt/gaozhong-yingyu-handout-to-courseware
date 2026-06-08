@@ -394,6 +394,80 @@ def r_answer(prs, tag, answer, analysis, apply_txt="", kp=""):
     return s
 
 
+def r_bigstmt(prs, item):
+    """C-AI 方法讲解大字页：big纯大字 / hl红大字 / stmt大字+要点 / genre文体 / core命题核心 / ratio占比。"""
+    k = item.get("kind", "big"); s = _blank(prs); title = item["title"]
+    col = "FF5050" if k == "hl" else PURPLE
+    if k in ("big", "hl"):     # 纯大字页：按字数自适应字号(仿标杆199/118/102/88)，满高居中
+        n = len(title)
+        sz = 150 if n <= 4 else 110 if n <= 8 else 80 if n <= 12 else 60
+        tb(s, title, 0.8, 3.6, PAGE_W - 1.6, 4.6, size=sz, bold=True, color=col,
+           ea=EA_CN, align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+        ai_note(s)
+        return s
+    tb(s, title, 0.8, 1.0, PAGE_W - 1.6, 1.4, size=54, bold=True,
+       color=col, ea=EA_CN, align=PP_ALIGN.CENTER)
+    if k == "stmt":
+        y = 3.4
+        for ln in item.get("lines", []):
+            box(s, ln, 4.3, y, 8.0, 1.1, fill="F3E9F7", line=PURPLE2, size=30,
+                color=INK, align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE, ea=EA_CN)
+            y += 1.35
+    elif k == "genre":
+        n = len(item["items"]); bw = 3.4; gap = (PAGE_W - n * bw) / (n + 1)
+        for i, (a, b) in enumerate(item["items"]):
+            x = gap + i * (bw + gap)
+            box(s, f"{a}\n{b}", x, 4.5, bw, 2.6, fill="F3E9F7", line=PURPLE2,
+                size=30, color=PURPLE, align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE, ea=EA_CN)
+    elif k == "core":
+        ftb(s, (4.0, 4.2, 8.6, 4.0), [[("plot_box", x)] for x in item["items"]],
+            align=PP_ALIGN.CENTER)
+    elif k == "ratio":
+        n = len(item["items"]); bw = 3.0; gap = (PAGE_W - n * bw) / (n + 1)
+        for i, (a, b) in enumerate(item["items"]):
+            x = gap + i * (bw + gap)
+            box(s, f"{a}\n{b}", x, 5.0, bw, 2.2, fill="FFF7EC", line=CARD_LN,
+                size=32, color=RED if b != "0%" else INK, align=PP_ALIGN.CENTER,
+                anchor=MSO_ANCHOR.MIDDLE, ea=EA_CN)
+    ai_note(s)
+    return s
+
+
+def r_para_main(prs, name, summary):
+    """C-AI 全文主旨概括（仿标杆S28 红字大块）。"""
+    s = _titled(prs, f"{name} · 全文主旨")
+    box(s, summary, 1.6, 3.8, PAGE_W - 3.2, 4.2, fill="FFF7EC", line=CARD_LN,
+        size=40, color="FF5050", align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.MIDDLE, ea=EA_CN)
+    ai_note(s)
+    return s
+
+
+def r_option_judge(prs, tag, stem, options, judge):
+    """C-AI 主旨辅助逐选项判定 + 秒解（仿标杆S30-31）。"""
+    s = _titled(prs, tag + " · 主旨辅助")
+    tags = judge.get("tags", []); verdict = judge.get("verdict", "")
+    P = [[("q_stem", stem)]]
+    for i, o in enumerate(options):
+        t = tags[i] if i < len(tags) else ""
+        P.append([("q_opt", o), ("q_opt_zh", "   〔" + t + "〕" if t else "")])
+    ftb(s, (1.0, 2.2, PAGE_W - 2, 7.2), P, ls=1.25)
+    box(s, verdict, 6.0, 9.7, 4.67, 1.3, fill=HL_BG if "秒解" in verdict else "FFF7EC",
+        line=HL_LN if "秒解" in verdict else CARD_LN, size=40, color="FF5050",
+        align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE, ea=EA_CN)
+    ai_note(s)
+    return s
+
+
+def r_warn(prs, w):
+    s = _blank(prs)
+    tb(s, "FBI WARNING", 0.8, 1.2, PAGE_W - 1.6, 1.6, size=72, bold=True,
+       color="FF5050", ea="Arial", align=PP_ALIGN.CENTER)
+    box(s, w["body"], 1.6, 4.0, PAGE_W - 3.2, 5.0, fill="FFF7EC", line=CARD_LN,
+        size=26, color=INK, align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.MIDDLE, ea=EA_CN)
+    ai_note(s)
+    return s
+
+
 def r_test(prs, kind, q, reveal):
     """课前测/课后测（C·AI 模仿标杆生成，标注待师审）：克隆模版固定页，保留"课前测/课后测"标题。"""
     s = clone_slide(prs, prs.slides[(T["pre"] if kind == "pre" else T["post"]) - 1])
@@ -593,38 +667,47 @@ def specs_reading(C):
     if SC.get("intro"):                          # C·AI 导入场景（仿标杆"似曾相似"）
         add("method", SC["intro"]["title"], lines=SC["intro"]["lines"],
             line_key="warn_line")
+    # ── PART1 辅助方法（蓝图 S9-74）──
     add("divider", "PART1", part=C["parts"][0], no=1)
     zz = C["part1_zhuzhi"]
-    add("section", zz.get("title", "主旨辅助"))
-    for m in SC.get("methods", {}).get("主旨辅助", []):          # C·AI 方法讲解
-        add("method", m["title"], lines=m["lines"])
+    oj = SC.get("option_judge", {}).get("主旨辅助", [])
+    for it in SC.get("zhuzhi_method_seq", []):                  # C·AI 方法讲解大字序列
+        add("bigstmt", "方法·" + it["title"], item=it)
     add("source", f"例篇 {zz['source']}", src=zz["source"])
     add("passage", "例篇语篇", paras=zz["passage"])
+    if SC.get("para_main", {}).get("主旨辅助"):                 # C·AI 全文主旨概括
+        add("para_main", "例篇·全文主旨", name="主旨辅助例篇", psum=SC["para_main"]["主旨辅助"])
     if zz.get("method_table"):
         add("table", "主旨辅助 练习表", rows=zz["method_table"], col_w=[5.0, 9.67], head=False)
-    applies = SC.get("zhuzhi_apply", [])
     for i, q in enumerate(zz["questions"], 1):
         tag = f"主旨辅助 · 第{i}题"
         add("question", tag, tag=tag, stem=q["stem"], options=q["options"],
             practice=q.get("practice", False))
+        if i - 1 < len(oj):                                    # C·AI 逐选项主旨判定+秒解
+            add("option_judge", tag + " 主旨判定", tag=tag, stem=q["stem"],
+                options=q["options"], judge=oj[i - 1])
         add("answer", tag + " 答", tag=tag, answer=q.get("answer", ""),
-            analysis=q.get("analysis", ""), kp=q.get("tag", ""),
-            apply_txt=applies[i - 1] if i - 1 < len(applies) else "")
+            analysis=q.get("analysis", ""), kp=q.get("tag", ""))
     ms = SC.get("method_summary")
     if ms:
-        add("method", ms["title"], lines=ms["lines"])             # 方法总结(C·AI)
+        add("method", ms["title"], lines=ms["lines"])          # 快速抓主旨(C·AI)
     xx = C["part1_xuanxiang"]
-    add("section", xx.get("title", "选项辅助"))
-    for m in SC.get("methods", {}).get("选项辅助", []):          # C·AI 方法讲解
-        add("method", m["title"], lines=m["lines"])
+    for it in SC.get("xuanxiang_method_seq", []):              # C·AI 选项辅助方法讲解
+        add("bigstmt", "方法·" + it["title"], item=it)
     if xx.get("table"):
         add("table", "选项辅助 特征表", rows=xx["table"], col_w=[2.6, 4.6, 2.6, 4.87],
             head=True, bsz=14)
+    if SC.get("warn_page"):
+        add("warn", "使用须知(AI)", w=SC["warn_page"])          # FBI风险页(C·AI)
+    # ── PART2 篇章训练（蓝图 S75-110）──
     add("divider", "PART2", part=C["parts"][1], no=2)
     for psg in C["part2"]:
         add("source", f"{psg['name']} {psg['source']}", src=psg["source"],
             level=psg.get("level", ""))
         add("passage", f"{psg['name']} 语篇", paras=psg["passage"])
+        if SC.get("para_main", {}).get(psg["name"]):           # C·AI 全文主旨概括
+            add("para_main", f"{psg['name']}·全文主旨", name=psg["name"],
+                psum=SC["para_main"][psg["name"]])
         zh_all = SC.get("options_zh", {}).get(psg["name"], [])
         for i, q in enumerate(psg["questions"], 1):
             tag = f"{psg['name']} · 第{i}题"
@@ -818,6 +901,10 @@ def render(content_path, template_path, out_path, lec_type=None, km_image=None):
                                      s.get("apply_txt", ""), s.get("kp", ""))
         elif r == "method": r_method(prs, s["summary"], s["lines"],
                                      s.get("line_key", "method_line"))
+        elif r == "bigstmt": r_bigstmt(prs, s["item"])
+        elif r == "para_main": r_para_main(prs, s["name"], s["psum"])
+        elif r == "option_judge": r_option_judge(prs, s["tag"], s["stem"], s["options"], s["judge"])
+        elif r == "warn": r_warn(prs, s["w"])
         elif r in ("test_q", "test_a"): r_test(prs, s["kind"], s["q"], s["reveal"])
         elif r == "flow": r_flow(prs, s["title"], s["steps"])
         elif r == "guide": r_guide(prs, s["name"])
