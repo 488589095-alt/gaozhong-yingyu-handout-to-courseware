@@ -30,7 +30,7 @@ REF_ATTRS = [qn('r:embed'), qn('r:link'), qn('r:id'), qn('r:pict')]
 # ════════ 设计 token（以 references/template_spec.md 为准，生成前必核对）════════
 TITLE_COL = "BA7AC2"                     # 模版页标题色(spec: 课前/课后测 Text5)
 PURPLE, PURPLE2 = "BA7AC2", "A076CE"     # 标题紫 / 次级紫(页码标pill)
-INK, RED, GOLD = "1A1A1A", "FF0000", "F2A900"   # RED=标杆答案红FF0000
+INK, RED, GOLD = "1F2329", "FF0000", "FE6C29"   # 对齐标杆调色板(近黑/答案红/橙)
 CARD_BG, CARD_LN = "FFF7EC", "E6C9A8"    # 暖卡片
 HL_BG, HL_LN = "E8F5E9", "46A35E"        # 正确高亮
 EA_TITLE, EA_CN, EA_EN = "阿里巴巴普惠体 B", "可口可乐在乎体 楷体", "Arial"
@@ -372,7 +372,13 @@ def r_question(prs, tag, stem, options, practice=False, zh=None):
     return s
 
 
-def r_answer(prs, tag, answer, analysis, apply_txt=""):
+def set_notes(slide, text):
+    """讲义元数据（知识标签）写进 PPT 备注，正文页保持干净。"""
+    if text:
+        slide.notes_slide.notes_text_frame.text = str(text)
+
+
+def r_answer(prs, tag, answer, analysis, apply_txt="", kp=""):
     s = _titled(prs, tag)
     ftb(s, (1.0, 2.1, PAGE_W - 2, 0.8), [[("ans_head", f"【答案】{answer}")]])
     y = 3.0
@@ -384,6 +390,7 @@ def r_answer(prs, tag, answer, analysis, apply_txt=""):
         ai_note(s)
     ftb(s, (1.0, y, PAGE_W - 2, PAGE_H - y - 0.9),
         [[("ans_body", "【解析】" + analysis)]], ls=1.22)
+    set_notes(s, kp)        # 知识标签→备注（讲义元数据，不上正文）
     return s
 
 
@@ -549,6 +556,7 @@ def r_detail(prs, d, desc, reveal):
     ftb(s, (1.29, 5.0, 14.09, 1.7), [[("detail_zh", d["zh"])]], ls=1.2)
     if reveal:
         ftb(s, (1.29, 6.9, 14.09, 1.7), [[("detail_en", d["en"])]], ls=1.15)
+    set_notes(s, d.get("tag", ""))    # 知识标签→备注
     return s
 
 
@@ -600,7 +608,7 @@ def specs_reading(C):
         add("question", tag, tag=tag, stem=q["stem"], options=q["options"],
             practice=q.get("practice", False))
         add("answer", tag + " 答", tag=tag, answer=q.get("answer", ""),
-            analysis=q.get("analysis", ""),
+            analysis=q.get("analysis", ""), kp=q.get("tag", ""),
             apply_txt=applies[i - 1] if i - 1 < len(applies) else "")
     ms = SC.get("method_summary")
     if ms:
@@ -624,7 +632,7 @@ def specs_reading(C):
             add("question", tag, tag=tag, stem=q["stem"], options=q["options"],
                 zh=zh, practice=q.get("practice", False))
             add("answer", tag + " 答", tag=tag, answer=q.get("answer", ""),
-                analysis=q.get("analysis", ""))
+                analysis=q.get("analysis", ""), kp=q.get("tag", ""))
     if SC.get("posttest"):                      # C·AI 课后测（结束页前）
         add("test_q", "课后测·题(AI)", kind="post", q=SC["posttest"], reveal=False)
         add("test_a", "课后测·答(AI)", kind="post", q=SC["posttest"], reveal=True)
@@ -807,7 +815,7 @@ def render(content_path, template_path, out_path, lec_type=None, km_image=None):
         elif r == "question": r_question(prs, s["tag"], s["stem"], s["options"],
                                           s.get("practice", False), s.get("zh"))
         elif r == "answer": r_answer(prs, s["tag"], s["answer"], s["analysis"],
-                                     s.get("apply_txt", ""))
+                                     s.get("apply_txt", ""), s.get("kp", ""))
         elif r == "method": r_method(prs, s["summary"], s["lines"],
                                      s.get("line_key", "method_line"))
         elif r in ("test_q", "test_a"): r_test(prs, s["kind"], s["q"], s["reveal"])
