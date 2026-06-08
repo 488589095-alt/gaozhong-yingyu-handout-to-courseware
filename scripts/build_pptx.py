@@ -69,15 +69,25 @@ def clone_slide(prs, src):
     return new
 
 
+DEFAULT_EA = "微软雅黑"   # 兜底中文字体：任何中文run都显式写ea，杜绝WPS/PPT回退"等线"
+
+
+def _has_cjk(run):
+    return any("一" <= c <= "鿿" for c in (run.text or ""))
+
+
 def _style(run, size, bold, color, ea, latin=None):
-    """None=不覆盖(继承模版)。ea=中文字体, latin=西文字体(缺省同ea)。"""
+    """None=不覆盖(继承模版)。ea=中文字体, latin=西文字体。
+       含中文的run若未给ea→兜底DEFAULT_EA(避免回退等线，跨端硬伤)。"""
     if size is not None:
         run.font.size = Pt(size)
     if bold is not None:
         run.font.bold = bold
     if color is not None:
         run.font.color.rgb = RGBColor.from_string(color)
-    pairs = (("ea", ea), ("latin", latin if latin is not None else ea))
+    ea_f = ea if ea is not None else (DEFAULT_EA if _has_cjk(run) else None)
+    lat_f = latin if latin is not None else ea
+    pairs = (("ea", ea_f), ("latin", lat_f))
     if any(v for _, v in pairs):
         rpr = run._r.get_or_add_rPr()
         for tag, v in pairs:
@@ -226,10 +236,14 @@ def _titled(prs, title):
        克隆模版第1页(版式7=卡片框+标题槽 Text 5)，仅换标题文字 →
        自动继承 spec 样式 sz40/不加粗/#BA7AC2/阿里巴巴普惠体B/居中@y0.98。"""
     s = clone_slide(prs, prs.slides[T["titled"] - 1])
-    setname(s, "Text 5", title)
-    sh = find(s, "Text 5")                 # 长标题加宽，保持居中
+    # 长标题自适应缩字号防溢出（标题槽单行 sz40≈装14中文字）
+    n = len(title)
+    sz = None if n <= 14 else (32 if n <= 20 else 26)
+    setname(s, "Text 5", title, size=sz)
+    sh = find(s, "Text 5")                 # 加宽+换行，保持居中
     if sh is not None:
-        sh.left = Inches((PAGE_W - 12.0) / 2); sh.width = Inches(12.0)
+        sh.left = Inches(0.8); sh.width = Inches(PAGE_W - 1.6)
+        sh.text_frame.word_wrap = True
     return s
 
 
